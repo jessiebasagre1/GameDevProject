@@ -15,6 +15,8 @@ public class MonsterAudio : MonoBehaviour
     public AudioClip[] footsteps;       // random one is played per step
     public AudioClip attackSwing;       // when an attack starts
     public AudioClip attackHit;         // when the hit lands on the player
+    public AudioClip hurtSound;         // when a shotgun blast makes it flinch
+    public AudioClip deathSound;        // when it dies
 
     [Header("Volumes")]
     [Range(0f, 1f)] public float roarVolume = 1f;
@@ -66,12 +68,16 @@ public class MonsterAudio : MonoBehaviour
     {
         ai.OnAttackStart += HandleAttackStart;
         ai.OnAttackHit += HandleAttackHit;
+        ai.OnHurt += HandleHurt;
+        ai.OnDied += HandleDied;
     }
 
     void OnDisable()
     {
         ai.OnAttackStart -= HandleAttackStart;
         ai.OnAttackHit -= HandleAttackHit;
+        ai.OnHurt -= HandleHurt;
+        ai.OnDied -= HandleDied;
     }
 
     AudioSource CreateSource(bool loop, AudioClip clip)
@@ -104,7 +110,7 @@ public class MonsterAudio : MonoBehaviour
 
         // loops fade in and out depending on what the monster is doing
         FadeLoop(chaseSrc, chasing ? chaseVolume : 0f);
-        FadeLoop(breathSrc, (!chasing && state != MonsterAI.State.Idle) ? breathingVolume : 0f);
+        FadeLoop(breathSrc, (!chasing && state != MonsterAI.State.Idle && state != MonsterAI.State.Dead) ? breathingVolume : 0f);
 
         // occasional growl while it hunts around
         bool roaming = state == MonsterAI.State.Patrol || state == MonsterAI.State.Search;
@@ -162,5 +168,15 @@ public class MonsterAudio : MonoBehaviour
     void HandleAttackHit()
     {
         if (attackHit != null) sfx.PlayOneShot(attackHit, attackVolume);
+    }
+
+    void HandleHurt()
+    {
+        if (hurtSound != null) sfx.PlayOneShot(hurtSound, attackVolume);
+    }
+
+    void HandleDied()
+    {
+        if (deathSound != null) sfx.PlayOneShot(deathSound, attackVolume);
     }
 }

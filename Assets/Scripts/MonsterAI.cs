@@ -7,7 +7,7 @@ using UnityEngine.AI;
 [RequireComponent(typeof(NavMeshAgent))]
 public class MonsterAI : MonoBehaviour
 {
-    public enum State { Idle, Patrol, Chase, Attack, Search }
+    public enum State { Idle, Patrol, Chase, Attack, Search, Stagger, Dead }
 
     [Header("References")]
     public Transform player;          // the Player cylinder
@@ -30,6 +30,7 @@ public class MonsterAI : MonoBehaviour
 
     [Header("Chase")]
     public float chaseSpeed = 4.5f;
+    public float pathUpdateInterval = 0.2f;   // how often the chase path is refreshed (higher = smoother)
     public float giveUpTime = 3f;         // gives up chasing if it can't get closer for this long (player unreachable)
     public float giveUpBlindTime = 6f;    // after giving up it ignores the player this long and searches elsewhere
 
@@ -48,6 +49,9 @@ public class MonsterAI : MonoBehaviour
     public float attackCooldown = 0.5f;   // pause after an attack before the next one
     public float turnSpeed = 8f;          // how fast it turns to face the player during an attack
 
+    [Header("Damage reaction")]
+    public float staggerTime = 1.2f;       // how long a hard hit stops it
+
     [Header("Hiding")]
     public float hideDiscoverDistance = 2.5f;  // while searching this close to where you hide, it may check there
     [Range(0f, 1f)] public float hideDiscoverChance = 0.3f;
@@ -56,12 +60,16 @@ public class MonsterAI : MonoBehaviour
     public string speedParam = "Speed";           // Float
     public string lookAroundParam = "LookAround"; // Bool
     public string attackParam = "Attack";         // Trigger
+    public string hitParam = "Hit";               // Trigger (flinch when shot)
+    public string dieParam = "Die";               // Trigger (death)
 
     public State state = State.Patrol;
 
     // other scripts (like MonsterAudio) can listen to these
     public event System.Action OnAttackStart;
     public event System.Action OnAttackHit;
+    public event System.Action OnHurt;
+    public event System.Action OnDied;
 
     NavMeshAgent agent;
     Collider playerCollider;
@@ -91,8 +99,25 @@ public class MonsterAI : MonoBehaviour
     float moveStuckTimer;   // has a destination but isn't moving
     float blindUntil;       // monster ignores the player until this time (after giving up)
 
-    int speedHash, lookHash, attackHash;
-    bool hasSpeedParam, hasLookParam, hasAttackParam;
+    float nextPathTime;
+    float staggerTimer;
+    int speedHash, lookHash, attackHash, hitHash, dieHash;
+    bool hasSpeedParam, hasLookParam, hasAttackParam, hasHitParam, hasDieParam;
+
+    // all monsters in the scene (used for noise)
+    public static readonly System.Collections.Generic.List<MonsterAI> All = new System.Collections.Generic.List<MonsterAI>();
+    void OnEnable() { All.Add(this); }
+    void OnDisable() { All.Remove(this); }
+
+    // a loud sound (gunshot, workbench...) makes nearby monsters go and investigate
+    public static void BroadcastNoise(Vector3 position, float radius)
+    {
+        for (int i = 0; i < All.Count; i++)
+        {
+            if (Vector3.Distance(All[i].transform.position, position) <= radius)
+                All[i].HearNoise(position);
+        }
+    }
 
     void Awake()
     {
@@ -111,11 +136,15 @@ public class MonsterAI : MonoBehaviour
             speedHash = Animator.StringToHash(speedParam);
             lookHash = Animator.StringToHash(lookAroundParam);
             attackHash = Animator.StringToHash(attackParam);
+            hitHash = Animator.StringToHash(hitParam);
+            dieHash = Animator.StringToHash(dieParam);
             foreach (var p in animator.parameters)
             {
                 if (p.nameHash == speedHash) hasSpeedParam = true;
                 if (p.nameHash == lookHash) hasLookParam = true;
                 if (p.nameHash == attackHash) hasAttackParam = true;
+                if (p.nameHash == hitHash) hasHitParam = true;
+                if (p.nameHash == dieHash) hasDieParam = true;
             }
         }
     }
@@ -129,6 +158,8 @@ public class MonsterAI : MonoBehaviour
 
     void Update()
     {
+        if (state == State.Dead) return;
+
         if (player == null) return;
 
         // player is dead -> stand down
@@ -177,7 +208,7 @@ public class MonsterAI : MonoBehaviour
                 if (sees)
                 {
                     // the player may be standing off the NavMesh, so aim for the nearest walkable point
-                    agent.SetDestination(SnapToNavMesh(lastSeenPosition, 5f));
+                    UpdateChaseDestination();
 
                     float dist = Vector3.Distance(transform.position, player.position);
                     if (dist <= attackRange && Time.time >= nextAttackTime)
@@ -194,7 +225,7 @@ public class MonsterAI : MonoBehaviour
                 }
                 else if (Time.time - lastSeenTime < sightMemory)
                 {
-                    agent.SetDestination(SnapToNavMesh(lastSeenPosition, 5f));
+                    UpdateChaseDestination();
                 }
                 else
                 {
@@ -217,6 +248,15 @@ public class MonsterAI : MonoBehaviour
                     agent.isStopped = false;
                     nextAttackTime = Time.time + attackCooldown;
                     state = State.Chase;
+                }
+                break;
+
+            case State.Stagger:
+                staggerTimer -= Time.deltaTime;
+                if (staggerTimer <= 0f)
+                {
+                    agent.isStopped = false;
+                    StartChase();
                 }
                 break;
 
@@ -259,10 +299,61 @@ public class MonsterAI : MonoBehaviour
         UpdateAnimator();
     }
 
+    // ---------- noise and damage (called by other scripts) ----------
+
+    void HearNoise(Vector3 position)
+    {
+        if (state != State.Patrol && state != State.Idle && state != State.Search) return;
+        if (playerHealth != null && playerHealth.isDead) return;
+
+        lastSeenPosition = position;
+        StartSearch();
+    }
+
+    // The monster was shot: it instantly knows where the shot came from, and a hard hit makes it flinch
+    public void ReactToHit(Vector3 attackerPosition, bool stagger)
+    {
+        if (state == State.Dead) return;
+
+        lastSeenPosition = attackerPosition;
+        lastSeenTime = Time.time;
+        blindUntil = 0f;
+
+        if (stagger)
+        {
+            state = State.Stagger;
+            staggerTimer = staggerTime;
+            attackTimer = 0f;
+            agent.isStopped = true;
+            agent.velocity = Vector3.zero;
+
+            if (animator != null && hasHitParam) animator.SetTrigger(hitHash);
+            OnHurt?.Invoke();
+        }
+        else if (state != State.Chase && state != State.Attack && state != State.Stagger)
+        {
+            StartChase();
+        }
+    }
+
+    public void Die()
+    {
+        if (state == State.Dead) return;
+
+        state = State.Dead;
+        agent.isStopped = true;
+        agent.ResetPath();
+        agent.velocity = Vector3.zero;
+
+        if (animator != null && hasDieParam) animator.SetTrigger(dieHash);
+        OnDied?.Invoke();
+    }
+
     // ---------- state changes ----------
 
     void StartChase()
     {
+        nextPathTime = 0f;
         stuckTimer = 0f;
         moveStuckTimer = 0f;
         state = State.Chase;
@@ -298,6 +389,14 @@ public class MonsterAI : MonoBehaviour
         if (!agent.pathPending && agent.velocity.sqrMagnitude < 0.05f) moveStuckTimer += Time.deltaTime;
         else moveStuckTimer = 0f;
         return moveStuckTimer > 2f;
+    }
+
+    // Re-planning the path every single frame makes the agent stutter, so do it a few times per second
+    void UpdateChaseDestination()
+    {
+        if (Time.time < nextPathTime) return;
+        nextPathTime = Time.time + pathUpdateInterval;
+        agent.SetDestination(SnapToNavMesh(lastSeenPosition, 5f));
     }
 
     void ReturnToPatrol()

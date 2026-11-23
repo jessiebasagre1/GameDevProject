@@ -96,4 +96,11 @@ public class FPSPlayer : MonoBehaviour
         xRotation = 0f;
         yVelocity = 0f;
     }
+
+    // used by the shotgun: tilts the view up a little
+    public void AddPitchKick(float degrees)
+    {
+        xRotation = Mathf.Clamp(xRotation - degrees, -85f, 85f);
+        cameraTransform.localRotation = Quaternion.Euler(xRotation, 0f, 0f);
+    }
 }
