@@ -5,6 +5,8 @@ using UnityEngine.SceneManagement;
 public class PlayerHealth : MonoBehaviour
 {
     public int maxHealth = 100;
+    [Tooltip("Old behaviour: reload the scene automatically after dying. Leave OFF to use the death screen from GameMenus.")]
+    public bool autoRestart = false;
     public float restartDelay = 3f;
 
     public int CurrentHealth { get; private set; }
@@ -34,7 +36,7 @@ public class PlayerHealth : MonoBehaviour
         if (movement != null) movement.enabled = false;
 
         // TODO: death screen / jumpscare
-        Invoke(nameof(Restart), restartDelay);
+        if (autoRestart) Invoke(nameof(Restart), restartDelay);
     }
 
     void Restart()

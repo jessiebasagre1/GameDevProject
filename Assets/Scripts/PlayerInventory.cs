@@ -11,12 +11,25 @@ public class PlayerInventory : MonoBehaviour
     public ShotgunWeapon shotgun;
     public int startingShells = 2;
 
+    [Header("Crosshair (appears once the shotgun is built)")]
+    public bool showCrosshair = true;
+    public Color crosshairColor = new Color(1f, 1f, 1f, 0.9f);
+    public float crosshairSize = 10f;         // length of each tick, in pixels
+    public float crosshairThickness = 2f;
+    public float crosshairGap = 6f;           // empty space around the centre
+    public float crosshairKick = 10f;         // the gap opens this much after a shot
+    [Tooltip("Optional: use your own crosshair image instead of the lines")]
+    public Texture2D crosshairTexture;
+    public float crosshairTextureSize = 48f;
+
     public int Blueprints { get; private set; }
     public int Shells { get; private set; }
     public bool HasShotgun { get; private set; }
     public bool HasAllBlueprints { get { return Blueprints >= blueprintsNeeded; } }
 
     MonsterHealth monster;
+    PlayerHiding hiding;
+    PlayerHealth health;
     string message;
     float messageTimer;
     GUIStyle bigStyle, smallStyle;
@@ -25,6 +38,8 @@ public class PlayerInventory : MonoBehaviour
     {
         Shells = startingShells;
         monster = FindFirstObjectByType<MonsterHealth>();
+        hiding = GetComponent<PlayerHiding>();
+        health = GetComponent<PlayerHealth>();
     }
 
     void Update()
@@ -104,5 +119,52 @@ public class PlayerInventory : MonoBehaviour
         // popup message (top-centre)
         if (messageTimer > 0f)
             GUI.Label(new Rect(0f, Screen.height * 0.12f, Screen.width, 40f), message, bigStyle);
+
+        DrawCrosshair();
+    }
+
+    // ---------- crosshair ----------
+
+    void DrawCrosshair()
+    {
+        if (!showCrosshair || !HasShotgun || shotgun == null) return;
+        if (hiding != null && hiding.IsHidden) return;
+        if (health != null && health.isDead) return;
+
+        Color c = crosshairColor;
+        if (shotgun.IsReloading) c.a *= 0.35f;                 // dimmed while reloading
+
+        float cx = Screen.width / 2f;
+        float cy = Screen.height / 2f;
+
+        if (crosshairTexture != null)
+        {
+            float s = crosshairTextureSize;
+            GUI.color = c;
+            GUI.DrawTexture(new Rect(cx - s / 2f, cy - s / 2f, s, s), crosshairTexture);
+            GUI.color = Color.white;
+            return;
+        }
+
+        // the gap opens for a moment after every shot, then closes again
+        float kick = Mathf.Clamp01(1f - shotgun.TimeSinceLastShot / 0.25f) * crosshairKick;
+        float gap = crosshairGap + kick;
+        float t = crosshairThickness;
+        float len = crosshairSize;
+
+        DrawBar(cx - gap - len, cy - t / 2f, len, t, c);       // left
+        DrawBar(cx + gap, cy - t / 2f, len, t, c);             // right
+        DrawBar(cx - t / 2f, cy - gap - len, t, len, c);       // top
+        DrawBar(cx - t / 2f, cy + gap, t, len, c);             // bottom
+        DrawBar(cx - t / 2f, cy - t / 2f, t, t, c);            // centre dot
+    }
+
+    void DrawBar(float x, float y, float w, float h, Color c)
+    {
+        GUI.color = new Color(0f, 0f, 0f, c.a * 0.6f);         // thin dark outline so it shows on bright walls
+        GUI.DrawTexture(new Rect(x - 1f, y - 1f, w + 2f, h + 2f), Texture2D.whiteTexture);
+        GUI.color = c;
+        GUI.DrawTexture(new Rect(x, y, w, h), Texture2D.whiteTexture);
+        GUI.color = Color.white;
     }
 }

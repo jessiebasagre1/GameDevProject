@@ -39,6 +39,8 @@ public class PlayerHiding : MonoBehaviour
 
     void Update()
     {
+        if (Time.timeScale == 0f) return;   // the game is paused
+
         if (messageTimer > 0f) messageTimer -= Time.deltaTime;
         if (transitioning) return;
 
@@ -82,6 +84,7 @@ public class PlayerHiding : MonoBehaviour
         currentSpot = spot;
         spot.IsOccupied = true;
 
+        fps.ForceStand();                    // get up first if crouching, so the slide-under positions are right
         fps.movementEnabled = false;
         fps.lookEnabled = false;
         controller.enabled = false;          // no collisions while sliding under the bed

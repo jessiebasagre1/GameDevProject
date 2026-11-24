@@ -51,6 +51,7 @@ public class ShotgunWeapon : MonoBehaviour
     Quaternion baseRot;
     float kick, dip, nextFireTime, flashTimer;
     bool reloading;
+    float lastShotTime = -10f;
 
     void Awake()
     {
@@ -129,6 +130,7 @@ public class ShotgunWeapon : MonoBehaviour
     void Fire()
     {
         Loaded--;
+        lastShotTime = Time.time;
         nextFireTime = Time.time + fireInterval;
 
         Play(fireSound);
@@ -221,4 +223,8 @@ public class ShotgunWeapon : MonoBehaviour
     {
         if (animator != null) animator.SetTrigger(triggerName);
     }
+
+    // used by the crosshair
+    public float TimeSinceLastShot { get { return Time.time - lastShotTime; } }
+    public bool IsReloading { get { return reloading; } }
 }

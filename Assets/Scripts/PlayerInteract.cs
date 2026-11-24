@@ -25,10 +25,19 @@ public class PlayerInteract : MonoBehaviour
     {
         hiding = GetComponent<PlayerHiding>();
         inventory = GetComponent<PlayerInventory>();
+
+        if (inventory == null)
+            Debug.LogWarning("PlayerInteract: there is no PlayerInventory on the Player, so pickups can't work. Add it next to PlayerInteract.");
+        if (cameraTransform == null && Camera.main != null)
+            cameraTransform = Camera.main.transform;
+        if (cameraTransform == null)
+            Debug.LogWarning("PlayerInteract: Camera Transform is not assigned.");
     }
 
     void Update()
     {
+        if (Time.timeScale == 0f) return;   // the game is paused
+
         if (messageTimer > 0f) messageTimer -= Time.deltaTime;
 
         door = null; pickup = null; bench = null;
